@@ -1,17 +1,43 @@
 from sqlalchemy.orm import declarative_base
-from app.db.session import engine
 
 # Create declarative base
 Base = declarative_base()
 
-# Import all models so Alembic can detect them
-from app.models.user import User
-from app.models.dataset import Dataset
-from app.models.dataset_row import DatasetRow
-from app.models.subscription import Subscription
+# Models are imported in app/models/__init__.py to avoid circular imports
 
 
 def init_db():
     """Initialize database tables."""
-    Base.metadata.create_all(bind=engine)
+    # Import engine here to avoid circular import
+    from app.db.session import engine
+    from sqlalchemy import text
+    import time
+    import logging
+    
+    # Import all models to register them with Base.metadata
+    # This must happen before create_all()
+    from app.models import User, Dataset, DatasetRow, Subscription  # noqa: F401
+    
+    logger = logging.getLogger(__name__)
+    
+    # Retry logic to wait for database to be ready
+    max_retries = 30
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            # Test connection
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            # If connection successful, create tables
+            Base.metadata.create_all(bind=engine)
+            logger.info("Database tables created successfully")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database not ready, retrying in {retry_delay}s... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"Failed to connect to database after {max_retries} attempts: {e}")
+                raise
 
