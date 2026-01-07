@@ -1,6 +1,6 @@
 from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, date, time
+from typing import Optional, Any
 
 
 class DatasetBase(BaseModel):
@@ -21,11 +21,24 @@ class DatasetResponse(DatasetBase):
 
 
 class DatasetRowBase(BaseModel):
-    date: str
+    date: date
+    time: Optional[time] = None
+    transaction_date: Optional[date] = None
     product: str
-    revenue: float
-    cost: float
-    commission: float
+    product_name: Optional[str] = None
+    platform: Optional[str] = None
+    revenue: Optional[float] = None
+    cost: Optional[float] = None
+    commission: Optional[float] = None
+    gross_value: Optional[float] = None
+    commission_value: Optional[float] = None
+    net_value: Optional[float] = None
+    quantity: Optional[int] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
+    sub_id1: Optional[str] = None
+    mes_ano: Optional[str] = None
+    raw_data: Optional[Any] = None
 
 
 class DatasetRowCreate(DatasetRowBase):

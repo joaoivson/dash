@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Numeric, Date, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Numeric, Date, Time, ForeignKey, Index, JSON
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 
@@ -13,11 +13,17 @@ class DatasetRow(Base):
     # Campos temporais
     date = Column(Date, nullable=False, index=True)
     transaction_date = Column(Date, nullable=True, index=True)  # Alias para date, mantém compatibilidade
+    time = Column(Time, nullable=True, index=True)  # Horário separado
     
     # Dimensões
     product = Column(String, nullable=False, index=True)
     product_name = Column(String, nullable=True, index=True)  # Alias para product
     platform = Column(String, nullable=True, index=True)
+    status = Column(String, nullable=True, index=True)  # Status do pedido
+    category = Column(String, nullable=True, index=True)  # Categoria Global L1
+    sub_id1 = Column(String, nullable=True, index=True)
+    mes_ano = Column(String, nullable=True, index=True)  # formato YYYY-MM
+    raw_data = Column(JSON, nullable=True)  # dados completos da linha
     
     # Métricas financeiras (campos originais para compatibilidade)
     revenue = Column(Numeric(12, 2), nullable=True)
