@@ -112,7 +112,7 @@ def normalize_raw_data(raw: dict) -> dict:
     return normalized
 
 
-def serialize_row(row: DatasetRow) -> dict:
+def serialize_row(row: DatasetRow, include_raw_data: bool = True) -> dict:
     return {
         "id": row.id,
         "dataset_id": row.dataset_id,
@@ -135,7 +135,7 @@ def serialize_row(row: DatasetRow) -> dict:
         "category": row.category,
         "sub_id1": row.sub_id1,
         "mes_ano": row.mes_ano,
-        "raw_data": row.raw_data,
+        "raw_data": row.raw_data if include_raw_data else None,
     }
 
 
@@ -293,7 +293,10 @@ def set_ad_spend(
         mappings = []
         for row in batch:
             raw = dict(row.raw_data) if row.raw_data else {}
-            raw["Valor gasto anuncios"] = amount_per_row
+            # acumula com valor anterior se existir
+            prev = raw.get("Valor gasto anuncios")
+            prev_val = _clean_number(prev) or 0
+            raw["Valor gasto anuncios"] = prev_val + amount_per_row
             mappings.append({"id": row.id, "raw_data": raw})
             updated += 1
         
@@ -314,8 +317,11 @@ def set_ad_spend(
 @router.get("/latest/rows", response_model=List[DatasetRowResponse])
 def list_latest_rows(
     user_id: int | None = Query(None),
-    start_date: date = Query(..., description="Data inicial (obrigatória)"),
-    end_date: date = Query(..., description="Data final (obrigatória)"),
+    start_date: date | None = Query(None, description="Data inicial (opcional)"),
+    end_date: date | None = Query(None, description="Data final (opcional)"),
+    include_raw_data: bool = Query(True, description="Incluir campo raw_data na resposta"),
+    limit: int | None = Query(None, ge=1, description="Quantidade máxima de linhas (opcional)"),
+    offset: int = Query(0, ge=0, description="Deslocamento para paginação"),
     db: Session = Depends(get_db),
 ):
     """
@@ -331,34 +337,33 @@ def list_latest_rows(
     resolved_end = end_date
     resolved_start = start_date
 
-    if resolved_start > resolved_end:
+    if resolved_start and resolved_end and resolved_start > resolved_end:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Data inicial não pode ser maior que a data final.",
         )
 
-    if (resolved_end - resolved_start).days > 90:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="O intervalo máximo permitido é de 90 dias.",
-        )
+    rows_query = db.query(DatasetRow).filter(DatasetRow.dataset_id == latest.id)
+    if resolved_start:
+        rows_query = rows_query.filter(DatasetRow.date >= resolved_start)
+    if resolved_end:
+        rows_query = rows_query.filter(DatasetRow.date <= resolved_end)
 
-    rows = (
-        db.query(DatasetRow)
-        .filter(DatasetRow.dataset_id == latest.id)
-        .filter(DatasetRow.date >= resolved_start)
-        .filter(DatasetRow.date <= resolved_end)
-        .order_by(DatasetRow.date.desc())
-        .all()
-    )
-    return JSONResponse(content=[serialize_row(r) for r in rows])
+    rows_query = rows_query.order_by(DatasetRow.date.desc(), DatasetRow.id.desc())
+    if limit:
+        rows_query = rows_query.limit(limit).offset(offset)
+    rows = rows_query.all()
+    return JSONResponse(content=[serialize_row(r, include_raw_data=include_raw_data) for r in rows])
 
 
 @router.get("/all/rows", response_model=List[DatasetRowResponse])
 def list_all_rows(
     user_id: int | None = Query(None),
-    start_date: date = Query(..., description="Data inicial (obrigatória)"),
-    end_date: date = Query(..., description="Data final (obrigatória)"),
+    start_date: date | None = Query(None, description="Data inicial (opcional)"),
+    end_date: date | None = Query(None, description="Data final (opcional)"),
+    include_raw_data: bool = Query(True, description="Incluir campo raw_data na resposta"),
+    limit: int | None = Query(None, ge=1, description="Quantidade máxima de linhas (opcional)"),
+    offset: int = Query(0, ge=0, description="Deslocamento para paginação"),
     db: Session = Depends(get_db),
 ):
     """
@@ -376,37 +381,37 @@ def list_all_rows(
     resolved_end = end_date
     resolved_start = start_date
 
-    if resolved_start > resolved_end:
+    if resolved_start and resolved_end and resolved_start > resolved_end:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Data inicial não pode ser maior que a data final.",
         )
 
-    if (resolved_end - resolved_start).days > 90:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="O intervalo máximo permitido é de 90 dias.",
-        )
-
-    rows = (
+    base_query = (
         db.query(DatasetRow)
         .join(Dataset, DatasetRow.dataset_id == Dataset.id)
         .filter(Dataset.user_id == resolved_user_id)
-        .filter(DatasetRow.date >= resolved_start)
-        .filter(DatasetRow.date <= resolved_end)
-        .order_by(DatasetRow.date.desc())
-        .all()
     )
-    # Se nada for encontrado no range solicitado, retorna todas as linhas do usuário
-    if not rows:
-        rows = (
-            db.query(DatasetRow)
-            .join(Dataset, DatasetRow.dataset_id == Dataset.id)
-            .filter(Dataset.user_id == resolved_user_id)
-            .order_by(DatasetRow.date.desc())
-            .all()
-        )
-    return JSONResponse(content=[serialize_row(r) for r in rows])
+
+    rows_query = base_query
+    if resolved_start:
+        rows_query = rows_query.filter(DatasetRow.date >= resolved_start)
+    if resolved_end:
+        rows_query = rows_query.filter(DatasetRow.date <= resolved_end)
+
+    rows_query = rows_query.order_by(DatasetRow.date.desc(), DatasetRow.id.desc())
+
+    if limit:
+        rows = rows_query.limit(limit).offset(offset).all()
+    else:
+        rows = rows_query.all()
+
+    # Se nada for encontrado no range solicitado e estamos na primeira página, retorna fallback geral
+    if not rows and offset == 0:
+        fallback_query = base_query.order_by(DatasetRow.date.desc(), DatasetRow.id.desc())
+        rows = fallback_query.limit(limit).offset(offset).all() if limit else fallback_query.all()
+
+    return JSONResponse(content=[serialize_row(r, include_raw_data=include_raw_data) for r in rows])
 
 
 @router.get("", response_model=List[DatasetResponse])

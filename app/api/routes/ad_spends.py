@@ -71,20 +71,21 @@ def create_ad_spend(
 @router.get("", response_model=List[AdSpendResponse])
 def list_ad_spends(
     user_id: int | None = Query(None),
-    start_date: date = Query(..., description="Data inicial"),
-    end_date: date = Query(..., description="Data final"),
+    start_date: date | None = Query(None, description="Data inicial (opcional)"),
+    end_date: date | None = Query(None, description="Data final (opcional)"),
     db: Session = Depends(get_db)
 ):
-    """Lista gastos de anúncios no período."""
+    """Lista gastos de anúncios. Se datas forem informadas, filtra pelo intervalo; caso contrário, retorna todos do usuário."""
     user = get_user(db, user_id)
     
-    query = db.query(AdSpend).filter(
-        AdSpend.user_id == user.id,
-        AdSpend.date >= start_date,
-        AdSpend.date <= end_date
-    )
+    query = db.query(AdSpend).filter(AdSpend.user_id == user.id)
+
+    if start_date:
+        query = query.filter(AdSpend.date >= start_date)
+    if end_date:
+        query = query.filter(AdSpend.date <= end_date)
     
-    return query.all()
+    return query.order_by(AdSpend.date.desc(), AdSpend.id.desc()).all()
 
 
 @router.patch("/{ad_spend_id}", response_model=AdSpendResponse)
